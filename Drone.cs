@@ -1,6 +1,8 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using System.Net.Sockets;
+using System.Text;
 
 namespace ProceduralPhysicsLab
 {
@@ -293,9 +295,14 @@ namespace ProceduralPhysicsLab
     public partial class Drone : Node3D
     {
         [ExportGroup("Telemetry & Debug")]
-        [Export] public bool EnableTelemetry = false;
+        [Export] public bool EnableTelemetry = true;
         [Export] public float TelemetryPrintRateHz = 4.0f;
         [Export] public bool EnableAnomalyDetector = true;
+        private UdpClient _udpClient;
+        private const string UDP_IP = "127.0.0.1";
+        private const int UDP_PORT = 9870;
+        private float _lastUdpErrorTime = -10.0f;
+        private const float ERROR_LOG_INTERVAL_SEC = 2.0f; // Limit error prints to avoid spamming console
 
         [ExportGroup("Quadcopter Config")]
         [Export] public float ArmLength = 0.5f;
@@ -308,8 +315,8 @@ namespace ProceduralPhysicsLab
         [Export] public float RotorMass = 0.05f;
         [Export] public float RotorRadius = 0.4f;
         [Export] public float RpmScaleFactor = 150.0f;
-        [Export] public float StructuralBreakForce = 2500.0f;
-        [Export] public float RotorBreakageMultiplier = 3.0f;
+        [Export] public float StructuralBreakForce = 1000.0f;
+        [Export] public float RotorBreakageMultiplier = 1.0f;
         [Export] public bool EnableGravitationalAnomaly = false;
 
 
@@ -349,7 +356,7 @@ namespace ProceduralPhysicsLab
         private RigidBodyState _simState;
 
         private CascadedAttitudeController _attController = new CascadedAttitudeController();
-        private PIDController _altPID = new PIDController(10.0f, 20.0f, 8.0f, 200.0f);
+        private PIDController _altPID = new PIDController(15.0f, 0.021777f, 9.0f, 200.0f);
 
         private float _targetAlt = 5.0f;
         private Quaternion _targetAttitude = Quaternion.Identity;
@@ -626,6 +633,14 @@ namespace ProceduralPhysicsLab
             SetupDownwashVolume();
             SetupHUD();
             Input.MouseMode = Input.MouseModeEnum.Captured;
+            try
+            {
+              _udpClient = new UdpClient();
+            }
+            catch (Exception ex)
+            {
+              GD.PrintErr($"[TELEMETRY INIT ERROR] Failed to instantiate UdpClient: {ex.Message}");
+            }
         }
 
         private void BuildWinchSystem()
@@ -677,7 +692,7 @@ namespace ProceduralPhysicsLab
 
           Color[] palette = { Colors.Coral, Colors.Teal, Colors.Gold, Colors.RebeccaPurple, Colors.DodgerBlue };
 
-          for (int i = 0; i < 500; i++)
+          for (int i = 0; i < 0; i++)
           {
             // 1. Generate the physical size first (from small 0.5m chunks to massive 3.0m boulders)
             float size = rng.RandfRange(0.5f, 3.0f);
@@ -897,13 +912,64 @@ namespace ProceduralPhysicsLab
 
         private void LogTelemetry()
         {
-            GD.Print("================= TELEMETRY DUMP =================");
-            GD.Print($"STATE   | Pos: {_simState.Position.ToString("F3")} | Vel: {_simState.Velocity.ToString("F3")} | AngVel: {_simState.AngularVelocity.ToString("F3")}");
-            GD.Print($"WINCH   | Dist: {_lastWinchDist:F3}m | Force: {_lastWinchForce.ToString("F1")} N | Hooked: {(_hookedPayload != null)}");
-            GD.Print($"CTRL    | AltError: {(_targetAlt - _simState.Position.Y):F3}m | PIDOut: {_lastPidOutput:F1} N | TqCmd: {_lastTorqueCmd.ToString("F2")}");
-            GD.Print($"MOTORS  | FL:{_actualMotorThrust[0]:F1} FR:{_actualMotorThrust[1]:F1} BL:{_actualMotorThrust[2]:F1} BR:{_actualMotorThrust[3]:F1}");
-            GD.Print($"FORCES  | ExtForceAcc: {_lastExtForce.ToString("F1")} N | ExtTorqAcc: {_lastExtTorque.ToString("F2")} Nm");
-            GD.Print("==================================================");
+          if (_udpClient == null)
+          {
+            ReportTelemetryError("UdpClient is uninitialized or null.");
+            return;
+          }
+
+          var metrics = new
+          {
+            timestamp = Time.GetTicksMsec() / 1000.0f,
+            alt_target = _targetAlt,
+            alt_actual = _simState.Position.Y,
+            alt_error = _targetAlt - _simState.Position.Y,
+            pid_out_n = _lastPidOutput,
+            vel_y = _simState.Velocity.Y,
+            cmd_torque_pitch = _lastTorqueCmd.X,
+            cmd_torque_yaw = _lastTorqueCmd.Y,
+            cmd_torque_roll = _lastTorqueCmd.Z,
+            thrust_fl = _actualMotorThrust[0],
+            thrust_fr = _actualMotorThrust[1],
+            thrust_bl = _actualMotorThrust[2],
+            thrust_br = _actualMotorThrust[3],
+            winch_force_n = _lastWinchForce.Length()
+          };
+
+          try
+          {
+            string jsonString = System.Text.Json.JsonSerializer.Serialize(metrics);
+            byte[] payload = Encoding.UTF8.GetBytes(jsonString);
+
+            _udpClient.Send(payload, payload.Length, UDP_IP, UDP_PORT);
+          }
+          catch (SocketException ex)
+          {
+            ReportTelemetryError($"SocketException on port {UDP_PORT}: {ex.Message} (Code: {ex.SocketErrorCode})");
+          }
+          catch (Exception ex)
+          {
+            ReportTelemetryError($"Unexpected telemetry serialization/transmission error: {ex.Message}");
+          }
+        }
+
+        private void ReportTelemetryError(string message)
+        {
+          float currentTime = Time.GetTicksMsec() / 1000.0f;
+
+          // Rate-limit the error reporting so it doesn't saturate the stdout/stderr stream or drop frames
+          if (currentTime - _lastUdpErrorTime >= ERROR_LOG_INTERVAL_SEC)
+          {
+            GD.PrintErr($"[TELEMETRY ERROR] {message}");
+            _lastUdpErrorTime = currentTime;
+          }
+        }
+
+        public override void _ExitTree()
+        {
+          _udpClient?.Close();
+          _udpClient?.Dispose();
+          _udpClient = null;
         }
 
         public void ApplyExternalWind(Vector3 force, Vector3 localOffset)
@@ -1923,8 +1989,8 @@ namespace ProceduralPhysicsLab
             $"WINCH CABLE: {_currentCableLength:F1}m / {MaxCableLength:F1}m\n" +
             $"WINCH STATUS: {(_electromagnetActive ? "MAGNET ACTIVE" : "MAGNET OFF")}\n" +
             $"PAYLOAD: {payloadInfo}\n\n" +
-            $"GYROSCOPICS:\nTotal Ly: {_telemetryLy:F2} kg m^2/s\n" +
-            $"Tau Cross-Coupling: ({_telemetryGyroTorque.X:F1}, {_telemetryGyroTorque.Y:F1}, {_telemetryGyroTorque.Z:F1}) Nm\n\n" +
+            // $"GYROSCOPICS:\nTotal Ly: {_telemetryLy:F2} kg m^2/s\n" +
+            // $"Tau Cross-Coupling: ({_telemetryGyroTorque.X:F1}, {_telemetryGyroTorque.Y:F1}, {_telemetryGyroTorque.Z:F1}) Nm\n\n" +
             $"[1] FL: {(_rotorStructurallyIntact[0] ? (_motorActive[0] ? "ON" : "FAIL") : "MISSING")} | Pwr: {_actualMotorThrust[0] * _thrustDirection:F1}\n" +
             $"[2] FR: {(_rotorStructurallyIntact[1] ? (_motorActive[1] ? "ON" : "FAIL") : "MISSING")} | Pwr: {_actualMotorThrust[1] * _thrustDirection:F1}\n" +
             $"[3] BL: {(_rotorStructurallyIntact[2] ? (_motorActive[2] ? "ON" : "FAIL") : "MISSING")} | Pwr: {_actualMotorThrust[2] * _thrustDirection:F1}\n" +
