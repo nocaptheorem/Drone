@@ -356,7 +356,7 @@ namespace ProceduralPhysicsLab
         private RigidBodyState _simState;
 
         private CascadedAttitudeController _attController = new CascadedAttitudeController();
-        private PIDController _altPID = new PIDController(15.0f, 0.021777f, 9.0f, 200.0f);
+        private PIDController _altPID = new PIDController(10.0f, 20.0f, 8.0f, 200.0f);
 
         private float _targetAlt = 5.0f;
         private Quaternion _targetAttitude = Quaternion.Identity;
