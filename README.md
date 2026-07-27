@@ -77,7 +77,7 @@ $$\dot{\mathbf{q}} = \frac{1}{2} \mathbf{q} \otimes \boldsymbol{\omega}$$
 
 #### Dynamic CoM Shift & Parallel Axis Theorem
 
-When a rotor breaks off at local position $\mathbf{r}_{\mathrm{part}}$, the mass drops to $M_{\mathrm{new}} = M - m_{\mathrm{part}}$. The Center of Mass shifts by:
+When a rotor breaks off at local position `$ \mathbf{r}_{\text{part}} $`, the mass drops to `$ M_{\text{new}} = M - m_{\text{part}} $`. The Center of Mass shifts by:
 
 $$\Delta\mathbf{r}_{\text{CoM}} = \frac{-m_{\text{part}} \mathbf{r}_{\text{part}}}{M_{\text{new}}}$$
 
