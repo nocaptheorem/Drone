@@ -47,7 +47,7 @@ This codebase simulates a **physics-driven, multi-rotor aerial vehicle (drone) o
 ### Key Systems Simulated
 
 * **Full 6-DoF Rigid-Body Mechanics:** High-order integration of spatial position, linear velocity, orientation (quaternions), and angular velocity using full 3D inertia tensors.
-* **Aerodynamics & Gyroscopic Dynamics:** Blade spin inertia, angular momentum ($\mathbf{L} = \mathbf{I}\boldsymbol{\omega}$), gyroscopic cross-coupling torques ($\boldsymbol{\omega} \times \mathbf{L}$), directional rotor drag, vortex ring states (VRS), and ground effect dynamics.
+* **Aerodynamics & Gyroscopic Dynamics:** Blade spin inertia, angular momentum (L = Iω), gyroscopic cross-coupling torques (ω × L), directional rotor drag, vortex ring states (VRS), and ground effect dynamics.
 * **Structural Breakage & Real-time CoM Recalculation:** Dynamic recalculation of mass, center of mass (CoM), and principal axes of inertia when rotors detach during extreme force impacts.
 * **Cascaded Flight Control System:** Multi-loop attitude stabilization, altitude PID control, feed-forward tension compensation, and closed-form dynamic thrust allocation for under-actuated (3-rotor or asymmetrical) configurations.
 * **Dynamic Winch & Electromagnet Load System:** Critically damped spring-damper cable physics carrying external, variable-mass rigid bodies.
@@ -80,7 +80,7 @@ $$\dot{\mathbf{q}} = \frac{1}{2} \mathbf{q} \otimes \boldsymbol{\omega}$$
 
 #### Dynamic CoM Shift & Parallel Axis Theorem
 
-When a rotor breaks off at local position $\mathbf{r}_{\text{part}}$, the mass drops to $M_{\text{new}} = M - m_{\text{part}}$. The Center of Mass shifts by:
+When a rotor breaks off at local position r_part, the mass drops to M_new = M - m_part. The Center of Mass shifts by:
 
 $$\Delta\mathbf{r}_{\text{CoM}} = \frac{-m_{\text{part}} \mathbf{r}_{\text{part}}}{M_{\text{new}}}$$
 
@@ -88,7 +88,7 @@ The code updates the primary inertia tensor by subtracting the removed component
 
 $$\mathbf{I}_{\text{shift}} = m \left( (\mathbf{r} \cdot \mathbf{r})\mathbf{E} - \mathbf{r} \otimes \mathbf{r} \right)$$
 
-Crucially, attachments like the winch hook offset ($\mathbf{r}_{\text{hook}}$) and remaining motor positions ($\mathbf{r}_{\text{rotor}, i}$) are updated relative to the shifted origin to preserve torque balance correctness:
+Crucially, attachments like the winch hook offset (r_hook) and remaining motor positions (r_rotor,i) are updated relative to the shifted origin to preserve torque balance correctness:
 
 $$\boldsymbol{\tau} = \mathbf{r} \times \mathbf{F}$$
 
@@ -136,7 +136,7 @@ $$c_{\text{crit}} = 2 \sqrt{k \cdot m_{\text{eff}}}, \quad c = c_{\text{crit}} \
 
 ### Component 4: Environmental Interaction Dynamics
 
-```
+```text
                [ Gravity Anomaly / Vortex ]
                             |
                      (Swirling Pull)
@@ -148,7 +148,6 @@ $$c_{\text{crit}} = 2 \sqrt{k \cdot m_{\text{eff}}}, \quad c = c_{\text{crit}} \
                             |                                 |
                             v                                 v
                    [ Dynamic Objects ]               [ Crater Shader Array ]
-
 
 ```
 
