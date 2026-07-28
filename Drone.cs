@@ -1966,34 +1966,43 @@ namespace ProceduralPhysicsLab
 
         private void SetupHUD()
         {
-            var canvas = new CanvasLayer(); AddChild(canvas);
-            _hud = new Label { Position = new Vector2(20, 20), LabelSettings = new LabelSettings { FontSize = 18, FontColor = Colors.Cyan, OutlineSize = 3, OutlineColor = Colors.Black } };
-            canvas.AddChild(_hud);
+          var canvas = new CanvasLayer();
+          AddChild(canvas);
+
+          _hud = new Label
+          {
+            LabelSettings = new LabelSettings
+            {
+              FontSize = 18,
+              FontColor = Colors.Cyan,
+              OutlineSize = 3,
+              OutlineColor = Colors.Black
+            },
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom
+          };
+
+          // Anchor to bottom-right of screen
+          _hud.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomRight, Control.LayoutPresetMode.KeepSize, 20);
+          // Shift margin inward from the screen edge
+          _hud.Position = new Vector2(_hud.Position.X - 230, _hud.Position.Y - 250);
+
+          canvas.AddChild(_hud);
         }
 
         private void UpdateHUD()
         {
-          string structuralMode = RotorBreakageMultiplier == 0f ? "UNBREAKABLE" : $"NORMAL (x{RotorBreakageMultiplier:F1})";
           float verticalVelocity = _simState.Velocity.Y;
 
           string payloadInfo = _hookedPayload == null ? "EMPTY" : $"{_hookedPayload.Mass:F1}kg Attached";
 
           _hud.Text = $"TARGET ALT: {_targetAlt:F1}m\n" +
             $"ACTUAL ALT: {_simState.Position.Y:F1}m\n" +
-            $"MASS: {_rk4.Mass:F2}kg\n" +
-            $"V. VELOCITY: {verticalVelocity:+0.0;-0.0;0.0} m/s\n" +
-            $"ROTOR STRENGTH: {structuralMode}\n" +
             $"CAM FOLLOW (TAB): {(CameraFollowsDrone ? "ON" : "OFF")}\n\n" +
-            $"WINCH CABLE: {_currentCableLength:F1}m / {MaxCableLength:F1}m\n" +
-            $"WINCH STATUS: {(_electromagnetActive ? "MAGNET ACTIVE" : "MAGNET OFF")}\n" +
-            $"PAYLOAD: {payloadInfo}\n\n" +
-            // $"GYROSCOPICS:\nTotal Ly: {_telemetryLy:F2} kg m^2/s\n" +
-            // $"Tau Cross-Coupling: ({_telemetryGyroTorque.X:F1}, {_telemetryGyroTorque.Y:F1}, {_telemetryGyroTorque.Z:F1}) Nm\n\n" +
             $"[1] FL: {(_rotorStructurallyIntact[0] ? (_motorActive[0] ? "ON" : "FAIL") : "MISSING")} | Pwr: {_actualMotorThrust[0] * _thrustDirection:F1}\n" +
             $"[2] FR: {(_rotorStructurallyIntact[1] ? (_motorActive[1] ? "ON" : "FAIL") : "MISSING")} | Pwr: {_actualMotorThrust[1] * _thrustDirection:F1}\n" +
             $"[3] BL: {(_rotorStructurallyIntact[2] ? (_motorActive[2] ? "ON" : "FAIL") : "MISSING")} | Pwr: {_actualMotorThrust[2] * _thrustDirection:F1}\n" +
-            $"[4] BR: {(_rotorStructurallyIntact[3] ? (_motorActive[3] ? "ON" : "FAIL") : "MISSING")} | Pwr: {_actualMotorThrust[3] * _thrustDirection:F1}\n\n" +
-            "CONTROLS:\nWASD - Pitch/Roll\nSPACE/SHIFT - Altitude\nQ/E - Yaw\nF - Toggle Thrust Direction\nTAB - Toggle Cam Follow\n1-4 - Toggle Motor Failures\nZ/C - Reel Winch Out/In\nX - Toggle Winch Magnet";
+            $"[4] BR: {(_rotorStructurallyIntact[3] ? (_motorActive[3] ? "ON" : "FAIL") : "MISSING")} | Pwr: {_actualMotorThrust[3] * _thrustDirection:F1}\n\n";
 
           _hud.LabelSettings.FontColor = _thrustDirection > 0 ? Colors.Cyan : Colors.Red;
         }
