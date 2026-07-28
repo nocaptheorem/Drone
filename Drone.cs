@@ -338,6 +338,11 @@ namespace ProceduralPhysicsLab
         [Export] public float CableDampingRatio = 0.85f;
         [Export] public float HookCaptureRadius = 1.5f;
 
+        [ExportGroup("Altitude PID")]
+        [Export] public float AltKp = 15.0f;
+        [Export] public float AltKi = 0.021777f;
+        [Export] public float AltKd = 9.0f;
+
         private AnimatableBody3D _gravityAnomaly = null!;
         private float _anomalyOrbitAngle = 0.0f;
         private RigidBody3D _magnetBody = null!;
@@ -364,7 +369,26 @@ namespace ProceduralPhysicsLab
 
         private AnimatableBody3D _drone = null!;
         private Camera3D _camera = null!;
-        private Label _hud = null!;
+        private RichTextLabel _hud = null!;
+
+        // Stores previous frame values for diffing
+        private struct HudTelemetryState
+        {
+          public float AltKp, AltKi, AltKd;
+          public int FlSign, FrSign, BlSign, BrSign; // Track sign instead of float magnitude
+          public bool FlIntact, FrIntact, BlIntact, BrIntact;
+          public bool FlActive, FrActive, BlActive, BrActive;
+          public bool CamFollow;
+        }
+
+        private HudTelemetryState _lastHudState;
+        private const float HUD_FLASH_DURATION = 0.35f;
+
+        // Flash timers for each tracked metric
+        private float _kpFlash, _kiFlash, _kdFlash;
+        private float _flFlash, _frFlash, _blFlash, _brFlash;
+        private float _camFlash;
+
         private Node3D[] _rotors = new Node3D[4];
         private Vector3[] _rotorPositions = new Vector3[4];
 
@@ -859,7 +883,22 @@ namespace ProceduralPhysicsLab
 
         public override void _PhysicsProcess(double delta)
         {
+            // Sync inspector values to the PID controller dynamically
+            _altPID.Kp = AltKp;
+            _altPID.Ki = AltKi;
+            _altPID.Kd = AltKd;
+
             float dt = (float)delta;
+
+
+            _kpFlash = Mathf.Max(0f, _kpFlash - dt);
+            _kiFlash = Mathf.Max(0f, _kiFlash - dt);
+            _kdFlash = Mathf.Max(0f, _kdFlash - dt);
+            _flFlash = Mathf.Max(0f, _flFlash - dt);
+            _frFlash = Mathf.Max(0f, _frFlash - dt);
+            _blFlash = Mathf.Max(0f, _blFlash - dt);
+            _brFlash = Mathf.Max(0f, _brFlash - dt);
+            _camFlash = Mathf.Max(0f, _camFlash - dt);
 
             HandleKeyboardInput(dt);
             UpdateElectromagnet();
@@ -986,6 +1025,26 @@ namespace ProceduralPhysicsLab
             }
             if (@event is InputEventKey key && key.Pressed && !key.Echo)
             {
+
+
+                // PID Tuning Shortcuts
+                float kpStep = 1.0f;
+                float kiStep = 0.002f;
+                float kdStep = 0.5f;
+
+                if (key.Keycode == Key.Key0)
+                {
+                  AltKp = Mathf.Max(0f, AltKp + (key.CtrlPressed ? -kpStep : kpStep));
+                }
+                else if (key.Keycode == Key.Key9)
+                {
+                  AltKi = Mathf.Max(0f, AltKi + (key.CtrlPressed ? -kiStep : kiStep));
+                }
+                else if (key.Keycode == Key.Key8)
+                {
+                  AltKd = Mathf.Max(0f, AltKd + (key.CtrlPressed ? -kdStep : kdStep));
+                }
+
                 if (key.Keycode == Key.Key1) _motorActive[0] = !_motorActive[0];
                 if (key.Keycode == Key.Key2) _motorActive[1] = !_motorActive[1];
                 if (key.Keycode == Key.Key3) _motorActive[2] = !_motorActive[2];
@@ -1969,42 +2028,90 @@ namespace ProceduralPhysicsLab
           var canvas = new CanvasLayer();
           AddChild(canvas);
 
-          _hud = new Label
+          _hud = new RichTextLabel
           {
-            LabelSettings = new LabelSettings
-            {
-              FontSize = 18,
-              FontColor = Colors.Cyan,
-              OutlineSize = 3,
-              OutlineColor = Colors.Black
-            },
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Bottom
+            BbcodeEnabled = true,
+            FitContent = true,
+            CustomMinimumSize = new Vector2(380, 260),
+            HorizontalAlignment = HorizontalAlignment.Right
           };
 
-          // Anchor to bottom-right of screen
+          _hud.AddThemeFontSizeOverride("normal_font_size", 20);
           _hud.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomRight, Control.LayoutPresetMode.KeepSize, 20);
-          // Shift margin inward from the screen edge
-          _hud.Position = new Vector2(_hud.Position.X - 230, _hud.Position.Y - 250);
+          _hud.Position = new Vector2(_hud.Position.X - 380, _hud.Position.Y - 260);
 
           canvas.AddChild(_hud);
         }
 
         private void UpdateHUD()
         {
-          float verticalVelocity = _simState.Velocity.Y;
+          // 1. Derive motor direction signs (+1 or -1) based on active thrust direction
+          int currentSign = _thrustDirection >= 0.0f ? 1 : -1;
+          string signStr = currentSign > 0 ? "+" : "-";
 
-          string payloadInfo = _hookedPayload == null ? "EMPTY" : $"{_hookedPayload.Mass:F1}kg Attached";
+          int flSign = _motorActive[0] ? currentSign : 0;
+          int frSign = _motorActive[1] ? currentSign : 0;
+          int blSign = _motorActive[2] ? currentSign : 0;
+          int brSign = _motorActive[3] ? currentSign : 0;
 
-          _hud.Text = $"TARGET ALT: {_targetAlt:F1}m\n" +
+          // 2. Diff PID gains
+          if (Mathf.Abs(_altPID.Kp - _lastHudState.AltKp) > 0.001f) _kpFlash = HUD_FLASH_DURATION;
+          if (Mathf.Abs(_altPID.Ki - _lastHudState.AltKi) > 0.0001f) _kiFlash = HUD_FLASH_DURATION;
+          if (Mathf.Abs(_altPID.Kd - _lastHudState.AltKd) > 0.001f) _kdFlash = HUD_FLASH_DURATION;
+
+          // 3. Diff motor lines ONLY on sign changes or status state flips
+          if (flSign != _lastHudState.FlSign ||
+              _motorActive[0] != _lastHudState.FlActive ||
+              _rotorStructurallyIntact[0] != _lastHudState.FlIntact) _flFlash = HUD_FLASH_DURATION;
+
+          if (frSign != _lastHudState.FrSign ||
+              _motorActive[1] != _lastHudState.FrActive ||
+              _rotorStructurallyIntact[1] != _lastHudState.FrIntact) _frFlash = HUD_FLASH_DURATION;
+
+          if (blSign != _lastHudState.BlSign ||
+              _motorActive[2] != _lastHudState.BlActive ||
+              _rotorStructurallyIntact[2] != _lastHudState.BlIntact) _blFlash = HUD_FLASH_DURATION;
+
+          if (brSign != _lastHudState.BrSign ||
+              _motorActive[3] != _lastHudState.BrActive ||
+              _rotorStructurallyIntact[3] != _lastHudState.BrIntact) _brFlash = HUD_FLASH_DURATION;
+
+          if (CameraFollowsDrone != _lastHudState.CamFollow) _camFlash = HUD_FLASH_DURATION;
+
+          // 4. Color interpolator
+          Color baseColor = Colors.Cyan;
+          Color flashColor = Colors.Red;
+          string GetHex(float timer) => baseColor.Lerp(flashColor, timer / HUD_FLASH_DURATION).ToHtml();
+
+          string flStatus = _rotorStructurallyIntact[0] ? (_motorActive[0] ? "ON" : "FAIL") : "MISSING";
+          string frStatus = _rotorStructurallyIntact[1] ? (_motorActive[1] ? "ON" : "FAIL") : "MISSING";
+          string blStatus = _rotorStructurallyIntact[2] ? (_motorActive[2] ? "ON" : "FAIL") : "MISSING";
+          string brStatus = _rotorStructurallyIntact[3] ? (_motorActive[3] ? "ON" : "FAIL") : "MISSING";
+
+          // 5. Render HUD string (showing state and sign: e.g., "ON (+)")
+          _hud.Text =
+            $"TARGET ALT: {_targetAlt:F1}m\n" +
             $"ACTUAL ALT: {_simState.Position.Y:F1}m\n" +
-            $"CAM FOLLOW (TAB): {(CameraFollowsDrone ? "ON" : "OFF")}\n\n" +
-            $"[1] FL: {(_rotorStructurallyIntact[0] ? (_motorActive[0] ? "ON" : "FAIL") : "MISSING")} | Pwr: {_actualMotorThrust[0] * _thrustDirection:F1}\n" +
-            $"[2] FR: {(_rotorStructurallyIntact[1] ? (_motorActive[1] ? "ON" : "FAIL") : "MISSING")} | Pwr: {_actualMotorThrust[1] * _thrustDirection:F1}\n" +
-            $"[3] BL: {(_rotorStructurallyIntact[2] ? (_motorActive[2] ? "ON" : "FAIL") : "MISSING")} | Pwr: {_actualMotorThrust[2] * _thrustDirection:F1}\n" +
-            $"[4] BR: {(_rotorStructurallyIntact[3] ? (_motorActive[3] ? "ON" : "FAIL") : "MISSING")} | Pwr: {_actualMotorThrust[3] * _thrustDirection:F1}\n\n";
+            $"PID: [color=#{GetHex(_kpFlash)}]Kp={_altPID.Kp:F2}[/color] | " +
+            $"[color=#{GetHex(_kiFlash)}]Ki={_altPID.Ki:F4}[/color] | " +
+            $"[color=#{GetHex(_kdFlash)}]Kd={_altPID.Kd:F2}[/color]\n" +
+            $"CAM FOLLOW (TAB): [color=#{GetHex(_camFlash)}]{(CameraFollowsDrone ? "ON" : "OFF")}[/color]\n\n" +
+            $"[1] FL: [color=#{GetHex(_flFlash)}]{flStatus} ({signStr})[/color]\n" +
+            $"[2] FR: [color=#{GetHex(_frFlash)}]{frStatus} ({signStr})[/color]\n" +
+            $"[3] BL: [color=#{GetHex(_blFlash)}]{blStatus} ({signStr})[/color]\n" +
+            $"[4] BR: [color=#{GetHex(_brFlash)}]{brStatus} ({signStr})[/color]";
 
-          _hud.LabelSettings.FontColor = _thrustDirection > 0 ? Colors.Cyan : Colors.Red;
+          // 6. Cache state for next frame
+          _lastHudState = new HudTelemetryState
+          {
+            AltKp = _altPID.Kp, AltKi = _altPID.Ki, AltKd = _altPID.Kd,
+            FlSign = flSign, FrSign = frSign, BlSign = blSign, BrSign = brSign,
+            FlIntact = _rotorStructurallyIntact[0], FrIntact = _rotorStructurallyIntact[1],
+            BlIntact = _rotorStructurallyIntact[2], BrIntact = _rotorStructurallyIntact[3],
+            FlActive = _motorActive[0], FrActive = _motorActive[1],
+            BlActive = _motorActive[2], BrActive = _motorActive[3],
+            CamFollow = CameraFollowsDrone
+          };
         }
     }
 }
