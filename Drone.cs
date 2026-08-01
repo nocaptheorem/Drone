@@ -4,9 +4,7 @@ using System.Text;
 
 namespace ProceduralPhysicsLab
 {
-    // =================================================================================
     // COMPONENT 1: FLIGHT STATE & 3D TENSOR RK4 INTEGRATOR
-    // =================================================================================
     public struct RigidBodyState
     {
         public Vector3 Position;
@@ -172,9 +170,7 @@ namespace ProceduralPhysicsLab
         }
     }
 
-    // =================================================================================
     // COMPONENT 2: CASCADED CONTROLLERS & ALTITUDE PID
-    // =================================================================================
     public class CascadedAttitudeController
     {
         public float KpOuter = 10.0f;
@@ -204,30 +200,18 @@ namespace ProceduralPhysicsLab
         }
     }
 
-    public class PIDController
+    public class PDController
     {
-        public float Kp, Ki, Kd;
-        private float _integralAccumulator, _integralLimit;
-        public PIDController(float p, float i, float d, float limit = 20.0f) { Kp = p; Ki = i; Kd = d; _integralLimit = limit; }
+        public float Kp, Kd;
+        public PDController(float p, float d) { Kp = p; Kd = d; }
 
-        public float Update(float error, float currentVelocity, float dt, bool freezeIntegral = false)
+        public float Update(float error, float currentVelocity, float dt)
         {
-            if (dt <= 0.0001f) return 0f;
-            if (!freezeIntegral)
-            {
-                _integralAccumulator += error * dt;
-                _integralAccumulator = Mathf.Clamp(_integralAccumulator, -_integralLimit, _integralLimit);
-            }
-            return (Kp * error) + (Ki * _integralAccumulator) + (Kd * (0f - currentVelocity));
+            return (Kp * error) - (Kd *  currentVelocity);
         }
-
-        public void Reset() => _integralAccumulator = 0f;
-        public void Bleed(float rate, float dt) => _integralAccumulator = Mathf.Lerp(_integralAccumulator, 0f, rate * dt);
     }
 
-    // =================================================================================
     // COMPONENT 3: PROCEDURAL TURBULENCE VOLUME
-    // =================================================================================
     public partial class TurbulenceVolume : Area3D
     {
         public Vector3 WindDirection = Vector3.Up;
@@ -338,10 +322,9 @@ namespace ProceduralPhysicsLab
         [Export] public float CableDampingRatio = 0.85f;
         [Export] public float HookCaptureRadius = 1.5f;
 
-        [ExportGroup("Altitude PID")]
-        [Export] public float AltKp = 15.0f;
-        [Export] public float AltKi = 0.021777f;
-        [Export] public float AltKd = 9.0f;
+        [ExportGroup("Altitude PD")]
+        [Export] public float AltKp = 0.0f;
+        [Export] public float AltKd = 0.0f;
 
         private AnimatableBody3D _gravityAnomaly = null!;
         private float _anomalyOrbitAngle = 0.0f;
@@ -359,7 +342,7 @@ namespace ProceduralPhysicsLab
         private RigidBodyState _simState;
 
         private CascadedAttitudeController _attController = new CascadedAttitudeController();
-        private PIDController _altPID = new PIDController(15.0f, 0.021777f, 9.0f, 200.0f);
+        private PDController _altPD = new PDController(0 , 0);
 
         private float _targetAlt = 5.0f;
         private Quaternion _targetAttitude = Quaternion.Identity;
@@ -374,7 +357,7 @@ namespace ProceduralPhysicsLab
         // Stores previous frame values for diffing
         private struct HudTelemetryState
         {
-          public float AltKp, AltKi, AltKd;
+          public float AltKp, AltKd;
           public int FlSign, FrSign, BlSign, BrSign; // Track sign instead of float magnitude
           public bool FlIntact, FrIntact, BlIntact, BrIntact;
           public bool FlActive, FrActive, BlActive, BrActive;
@@ -385,7 +368,7 @@ namespace ProceduralPhysicsLab
         private const float HUD_FLASH_DURATION = 0.35f;
 
         // Flash timers for each tracked metric
-        private float _kpFlash, _kiFlash, _kdFlash;
+        private float _kpFlash, _kdFlash;
         private float _flFlash, _frFlash, _blFlash, _brFlash;
         private float _camFlash;
 
@@ -883,16 +866,13 @@ namespace ProceduralPhysicsLab
 
         public override void _PhysicsProcess(double delta)
         {
-            // Sync inspector values to the PID controller dynamically
-            _altPID.Kp = AltKp;
-            _altPID.Ki = AltKi;
-            _altPID.Kd = AltKd;
+            // Sync inspector values to the PD controller dynamically
+            _altPD.Kp = AltKp;
+            _altPD.Kd = AltKd;
 
             float dt = (float)delta;
 
-
             _kpFlash = Mathf.Max(0f, _kpFlash - dt);
-            _kiFlash = Mathf.Max(0f, _kiFlash - dt);
             _kdFlash = Mathf.Max(0f, _kdFlash - dt);
             _flFlash = Mathf.Max(0f, _flFlash - dt);
             _frFlash = Mathf.Max(0f, _frFlash - dt);
@@ -1025,22 +1005,15 @@ namespace ProceduralPhysicsLab
             }
             if (@event is InputEventKey key && key.Pressed && !key.Echo)
             {
-
-
-                // PID Tuning Shortcuts
+                // PD Tuning Shortcuts
                 float kpStep = 1.0f;
-                float kiStep = 0.002f;
                 float kdStep = 0.5f;
 
-                if (key.Keycode == Key.Key0)
+                if (key.Keycode == Key.Key8)
                 {
                   AltKp = Mathf.Max(0f, AltKp + (key.CtrlPressed ? -kpStep : kpStep));
                 }
-                else if (key.Keycode == Key.Key9)
-                {
-                  AltKi = Mathf.Max(0f, AltKi + (key.CtrlPressed ? -kiStep : kiStep));
-                }
-                else if (key.Keycode == Key.Key8)
+                else if (key.Keycode == Key.Key0)
                 {
                   AltKd = Mathf.Max(0f, AltKd + (key.CtrlPressed ? -kdStep : kdStep));
                 }
@@ -1069,7 +1042,7 @@ namespace ProceduralPhysicsLab
             if (Input.IsKeyPressed(Key.Z)) _currentCableLength = Mathf.Min(_currentCableLength + CableReelSpeed * dt, MaxCableLength);
             if (Input.IsKeyPressed(Key.C)) _currentCableLength = Mathf.Max(_currentCableLength - CableReelSpeed * dt, 0.0f);
 
-            float maxTilt = 1.2f;
+            float maxTilt = 1.15f;
             float targetPitch = 0, targetRoll = 0, yawRate = 0;
 
             if (Input.IsKeyPressed(Key.W)) targetPitch = -maxTilt;
@@ -1218,7 +1191,9 @@ namespace ProceduralPhysicsLab
                 float distToGround = _simState.Position.Y - analyticalGroundY;
 
                 var spaceState = GetWorld3D().DirectSpaceState;
-                var query = PhysicsRayQueryParameters3D.Create(_simState.Position, _simState.Position + Vector3.Down * 10.0f);
+                var query = PhysicsRayQueryParameters3D.Create(_simState.Position,
+                    _simState.Position + Vector3.Down * 10.0f);
+
                 var result = spaceState.IntersectRay(query);
                 if (result.Count > 0)
                 {
@@ -1226,33 +1201,31 @@ namespace ProceduralPhysicsLab
                     distToGround = Mathf.Min(distToGround, _simState.Position.Y - physicalHitY);
                 }
 
-                float groundEffect = 1.0f;
-                if (distToGround < 10.0f && distToGround > 0f) groundEffect += 0.5f * Mathf.Exp(-distToGround * 2.0f);
-
                 float tiltFactor = currentBasis.Y.Y;
                 float clampedTilt = Mathf.Max(0.5f, tiltFactor);
 
-                bool motorsSaturated = false;
-                for (int i = 0; i < 4; i++) if (_actualMotorThrust[i] >= MaxMotorThrust * 0.95f) motorsSaturated = true;
-
                 float altError = _targetAlt - _simState.Position.Y;
-                bool freezeIntegral = motorsSaturated && altError > 0;
 
-                float altCmd = 0f;
-                if (tiltFactor > 0.4f) {
-                    altCmd = _altPID.Update(altError, _simState.Velocity.Y, dt, freezeIntegral);
-                } else {
-                    _altPID.Bleed(5.0f, dt);
-                }
-                if (step == subSteps - 1) _lastPidOutput = altCmd;
+                float altitutePDThrust = _altPD.Update(altError, _simState.Velocity.Y, dt);
 
-                float hoverThrust = (_rk4.Mass * 9.81f) / (intactCount > 0 ? (intactCount * groundEffect * clampedTilt) : 1f);
+                float groundEffect = 1.0f;
+                if (distToGround < 10.0f && distToGround > 0f)
+                  groundEffect += 0.5f * Mathf.Exp(-distToGround * 2.0f);
+
+                // Need at least this to cancel gravity
+                float antigravityThrust = ((_rk4.Mass + 0.862f) * 9.81f ) / (intactCount > 0 ?
+                    (intactCount * groundEffect * clampedTilt) : 1f);
+                // avoid division by zero if no thrusters exist
 
                 // Inject feed forward tension compensation immediately to fight sag
-                float ffThrust = feedForwardDownwardThrust / (intactCount > 0 ? (intactCount * clampedTilt) : 1f);
-                float baseThrust = hoverThrust + ffThrust + altCmd;
+                float antiPayloadThrust =
+                  feedForwardDownwardThrust / (intactCount > 0 ? (intactCount * clampedTilt) : 1f);
+                float baseThrust = antigravityThrust + antiPayloadThrust + altitutePDThrust;
 
                 float totalThrustCmd = baseThrust * intactCount;
+
+                // Telemetry
+                if (step == subSteps - 1) _lastPidOutput = altitutePDThrust;
 
                 float[] cmdThrust = new float[4];
 
@@ -1680,7 +1653,6 @@ namespace ProceduralPhysicsLab
             Vector3 newGlobalAngVel = outPortal.GlobalBasis * (flipY.Basis * localAngVel);
             _simState.AngularVelocity = newTrans.Basis.Inverse() * newGlobalAngVel;
 
-            _altPID.Reset();
             _targetAlt = _simState.Position.Y;
 
             Vector3 forward = newTrans.Basis.Z;
@@ -2055,9 +2027,8 @@ namespace ProceduralPhysicsLab
           int brSign = _motorActive[3] ? currentSign : 0;
 
           // 2. Diff PID gains
-          if (Mathf.Abs(_altPID.Kp - _lastHudState.AltKp) > 0.001f) _kpFlash = HUD_FLASH_DURATION;
-          if (Mathf.Abs(_altPID.Ki - _lastHudState.AltKi) > 0.0001f) _kiFlash = HUD_FLASH_DURATION;
-          if (Mathf.Abs(_altPID.Kd - _lastHudState.AltKd) > 0.001f) _kdFlash = HUD_FLASH_DURATION;
+          if (Mathf.Abs(_altPD.Kp - _lastHudState.AltKp) > 0.001f) _kpFlash = HUD_FLASH_DURATION;
+          if (Mathf.Abs(_altPD.Kd - _lastHudState.AltKd) > 0.001f) _kdFlash = HUD_FLASH_DURATION;
 
           // 3. Diff motor lines ONLY on sign changes or status state flips
           if (flSign != _lastHudState.FlSign ||
@@ -2092,9 +2063,8 @@ namespace ProceduralPhysicsLab
           _hud.Text =
             $"TARGET ALT: {_targetAlt:F1}m\n" +
             $"ACTUAL ALT: {_simState.Position.Y:F1}m\n" +
-            $"PID: [color=#{GetHex(_kpFlash)}]Kp={_altPID.Kp:F2}[/color] | " +
-            $"[color=#{GetHex(_kiFlash)}]Ki={_altPID.Ki:F4}[/color] | " +
-            $"[color=#{GetHex(_kdFlash)}]Kd={_altPID.Kd:F2}[/color]\n" +
+            $"PD: [color=#{GetHex(_kpFlash)}]Kp={_altPD.Kp:F2}[/color] | " +
+            $"[color=#{GetHex(_kdFlash)}]Kd={_altPD.Kd:F2}[/color]\n" +
             $"CAM FOLLOW (TAB): [color=#{GetHex(_camFlash)}]{(CameraFollowsDrone ? "ON" : "OFF")}[/color]\n\n" +
             $"[1] FL: [color=#{GetHex(_flFlash)}]{flStatus} ({signStr})[/color]\n" +
             $"[2] FR: [color=#{GetHex(_frFlash)}]{frStatus} ({signStr})[/color]\n" +
@@ -2104,7 +2074,7 @@ namespace ProceduralPhysicsLab
           // 6. Cache state for next frame
           _lastHudState = new HudTelemetryState
           {
-            AltKp = _altPID.Kp, AltKi = _altPID.Ki, AltKd = _altPID.Kd,
+            AltKp = _altPD.Kp, AltKd = _altPD.Kd,
             FlSign = flSign, FrSign = frSign, BlSign = blSign, BrSign = brSign,
             FlIntact = _rotorStructurallyIntact[0], FrIntact = _rotorStructurallyIntact[1],
             BlIntact = _rotorStructurallyIntact[2], BrIntact = _rotorStructurallyIntact[3],
